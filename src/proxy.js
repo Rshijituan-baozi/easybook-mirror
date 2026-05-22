@@ -254,6 +254,12 @@ export function createEasybookProxy(publicHost) {
       'sec-ch-ua-platform': '"Windows"',
     },
     on: {
+      proxyReq: (proxyReq, req, res) => {
+        // Strip gRecaptchaResponse parameter (too long, triggers IIS URLScan 404)
+        if (proxyReq.path && proxyReq.path.includes('gRecaptchaResponse=')) {
+          proxyReq.path = proxyReq.path.replace(/[&?]gRecaptchaResponse=[^&]*/g, '');
+        }
+      },
       proxyRes: (proxyRes, req, res) => {
         if (res.headersSent) { proxyRes.resume(); return; }
         const statusCode = proxyRes.statusCode || 200;
