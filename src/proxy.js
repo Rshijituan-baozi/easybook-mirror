@@ -267,8 +267,12 @@ export function createEasybookProxy(publicHost) {
 
         // Cloudflare errors: serve from cache, slow down upstream
         if (statusCode === 403 || statusCode === 429 || statusCode === 503 || statusCode === 520) {
-          recordFailure();
-          slowDown();
+          // Only count GET page failures toward circuit breaker (POST/API can't be cached)
+          const isHtmlReq = (ct === 'text/html') || (!(req.url.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff2?|json|ashx|xml|txt)(\?|$)/i)) && req.method === 'GET');
+          if (isHtmlReq) {
+            recordFailure();
+            slowDown();
+          }
           proxyRes.resume();
           if (res.headersSent) return;
           const ck = cacheKey(req);
@@ -348,8 +352,11 @@ export function createEasybookProxy(publicHost) {
       },
       error: (err, req, res) => {
         if (res.headersSent) return;
-        recordFailure();
-        slowDown();
+        // Only count GET page errors toward circuit breaker
+        if (req.method === 'GET') {
+          recordFailure();
+          slowDown();
+        }
         console.error('[Proxy]', err.message);
         const ck = cacheKey(req);
         const stale = cacheGetStale(ck, Infinity);
