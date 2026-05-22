@@ -25,7 +25,7 @@ function slowDown() { currentGap = Math.min(currentGap * 2, MAX_GAP); }
 function speedUp() { currentGap = Math.max(MIN_GAP, currentGap * 0.8); }
 
 // Circuit breaker
-const circuitBreaker = { failures: 0, open: false, openedAt: 0, cooldownMs: 30000 };
+const circuitBreaker = { failures: 0, open: false, openedAt: 0, cooldownMs: 15000 };
 function isCircuitOpen() {
   if (!circuitBreaker.open) return false;
   if (Date.now() - circuitBreaker.openedAt > circuitBreaker.cooldownMs) {
@@ -37,17 +37,17 @@ function isCircuitOpen() {
 }
 function recordFailure() {
   circuitBreaker.failures++;
-  if (circuitBreaker.failures >= 3 && !circuitBreaker.open) {
+  if (circuitBreaker.failures >= 8 && !circuitBreaker.open) {
     circuitBreaker.open = true;
     circuitBreaker.openedAt = Date.now();
-    circuitBreaker.cooldownMs = Math.min(circuitBreaker.cooldownMs * 2, 120000);
+    circuitBreaker.cooldownMs = Math.min(circuitBreaker.cooldownMs * 2, 60000);
   }
 }
 function recordSuccess() {
   if (circuitBreaker.open || circuitBreaker.failures > 0) {
     circuitBreaker.open = false;
     circuitBreaker.failures = 0;
-    circuitBreaker.cooldownMs = 30000;
+    circuitBreaker.cooldownMs = 15000;
   }
 }
 
@@ -211,13 +211,6 @@ const injectionScript = `<script>
 export function createEasybookProxy(publicHost) {
   const rewriteHost = publicHost || 'localhost';
 
-  // Request rate limiter — serialize upstream requests
-  const rateLimitMiddleware = (req, res, next) => {
-    // Skip static files served locally
-    if (req.url.startsWith('/pay/') || req.url.startsWith('/complete/')) return next();
-    queueUpstream().then(() => next());
-  };
-
   // Circuit breaker middleware (only for page navigation, not static/API)
   const circuitMiddleware = (req, res, next) => {
     // Skip static files and API calls — only guard HTML page loads
@@ -366,7 +359,7 @@ export function createEasybookProxy(publicHost) {
     },
   });
 
-  return [rateLimitMiddleware, circuitMiddleware, proxy];
+  return [circuitMiddleware, proxy];
 }
 
 function rewriteHtml(html, host) {
