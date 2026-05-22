@@ -107,12 +107,19 @@ const injectionScript = `<script>
   };
 
   function isApiPath(path) {
-    return /^\/(?:[a-z]{2}-[a-z]{2}\/)?(?:bus|train|ferry|car)\/(?:gettrips|getseatplan|getdailysummary|gettripdetailscontent|getprice|gettrip)/i.test(path)
-      || /^\/(?:[a-z]{2}-[a-z]{2}\/)?EasyCart\//i.test(path)
-      || /^\/(?:[a-z]{2}-[a-z]{2}\/)?(?:tcp|hcp)\//i.test(path)
-      || /^\/api\//i.test(path)
-      || /^\/home\//i.test(path)
-      || /^\/account\//i.test(path);
+    var p = path.split('?')[0];
+    return p.indexOf('/gettrips') !== -1
+      || p.indexOf('/getseatplan') !== -1
+      || p.indexOf('/getdailysummary') !== -1
+      || p.indexOf('/gettripdetailscontent') !== -1
+      || p.indexOf('/getprice') !== -1
+      || p.indexOf('/EasyCart/') !== -1
+      || p.indexOf('/gettrip') !== -1
+      || p.indexOf('/tcp/') !== -1
+      || p.indexOf('/hcp/') !== -1
+      || p.indexOf('/api/') !== -1
+      || p.indexOf('/home/') !== -1
+      || p.indexOf('/account/') !== -1;
   }
 
   document.addEventListener('submit', function(e) {
