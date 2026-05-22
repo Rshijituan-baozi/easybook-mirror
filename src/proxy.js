@@ -211,8 +211,11 @@ const injectionScript = `<script>
 export function createEasybookProxy(publicHost) {
   const rewriteHost = publicHost || 'localhost';
 
-  // Circuit breaker middleware
+  // Circuit breaker middleware (only for page navigation, not static/API)
   const circuitMiddleware = (req, res, next) => {
+    // Skip static files and API calls — only guard HTML page loads
+    if (req.url.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff2?|json|ashx|xml|txt)(\?|$)/i)) return next();
+    if (req.url.startsWith('/api/') || req.url.startsWith('/images/') || req.url.startsWith('/BotDetect')) return next();
 
     if (!isCircuitOpen()) return next();
     const ck = cacheKey(req);
