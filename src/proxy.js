@@ -116,10 +116,7 @@ const injectionScript = `<script>
       || p.indexOf('/EasyCart/') !== -1
       || p.indexOf('/gettrip') !== -1
       || p.indexOf('/tcp/') !== -1
-      || p.indexOf('/hcp/') !== -1
-      || p.indexOf('/api/') !== -1
-      || p.indexOf('/home/') !== -1
-      || p.indexOf('/account/') !== -1;
+      || p.indexOf('/hcp/') !== -1;
   }
 
   document.addEventListener('submit', function(e) {
