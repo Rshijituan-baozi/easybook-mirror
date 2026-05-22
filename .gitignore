@@ -1,2 +1,6 @@
 node_modules/
 .env
+*.log
+stderr.log
+stdout.log
+server.log
