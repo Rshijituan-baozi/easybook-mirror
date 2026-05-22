@@ -218,10 +218,20 @@ export function createEasybookProxy(publicHost) {
         }
 
         const chunks = [];
-        proxyRes.on('data', c => chunks.push(c));
+        let cfDetected = false;
+        proxyRes.on('data', c => { if (!cfDetected && (statusCode === 403 || statusCode === 503) && /(?:安全验证|just a moment|_cf_chl_opt|challenge-platform|cf-browser-verification)/i.test(c.toString())) cfDetected = true; chunks.push(c); });
         proxyRes.on('end', () => {
           if (res.headersSent) return;
           try {
+            // Cloudflare challenge page: don't cache, serve stale instead
+            if (cfDetected) {
+              console.log('[CF] Challenge detected for', req.url);
+              const cached = cacheGet(ck);
+              if (cached) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': String(cached.data.length), 'x-served-from': 'cache' }); res.end(cached.data); return; }
+              res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'retry-after': '30' });
+              res.end('<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="30"></head><body style="font-family:sans-serif;text-align:center;padding:50px"><h2>Site is busy</h2><p>Please wait and try again in a moment.</p></body></html>');
+              return;
+            }
             let body = Buffer.concat(chunks);
             const ce = proxyRes.headers['content-encoding'];
             if (ce) { try { body = ce.includes('br') ? zlib.brotliDecompressSync(body) : zlib.gunzipSync(body); } catch {} }
