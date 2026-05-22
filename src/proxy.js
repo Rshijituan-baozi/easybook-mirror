@@ -52,7 +52,7 @@ function recordSuccess() {
 }
 
 // Stale cache support
-const STALE_TTL = 30 * 60 * 1000;
+const STALE_TTL = 120 * 60 * 1000;
 function cacheGetStale(key, ttl) {
   const e = cache.get(key);
   if (!e) return null;
@@ -211,14 +211,8 @@ const injectionScript = `<script>
 export function createEasybookProxy(publicHost) {
   const rewriteHost = publicHost || 'localhost';
 
-  // Circuit breaker middleware (with rate limiting only for HTML pages)
-  const circuitMiddleware = async (req, res, next) => {
-    // Only rate-limit page navigation, not static resources
-    const accept = (req.headers.accept || '').toLowerCase();
-    const isPage = accept.includes('text/html') ||
-      !req.url.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff2?|json|xml|txt)(\?|$)/i) ||
-      req.url === '/' || req.url.startsWith('/?');
-    if (isPage) await queueUpstream();
+  // Circuit breaker middleware
+  const circuitMiddleware = (req, res, next) => {
 
     if (!isCircuitOpen()) return next();
     const ck = cacheKey(req);
