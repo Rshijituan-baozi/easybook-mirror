@@ -385,7 +385,6 @@ function rewriteHtml(html, host) {
   html = html.replace(/(src=")(\/bundles\/[^"]*")/gi, '$1https://www.easybook.com$2');
   html = html.replace(/(src=")(\/images\/[^"]*")/gi, '$1https://www.easybook.com$2');
   html = html.replace(/(src=")(\/BotDetectCaptcha[^"]*")/gi, '$1https://www.easybook.com$2');
-  html = html.replace(/(href=")(\/Content\/[^"]*")/gi, '$1https://www.easybook.com$2');
   html = html.replace(/(href=")(\/favicon[^"]*")/gi, '$1https://www.easybook.com$2');
   html = html.replace(/(srcset=")(\/images\/[^"]*")/gi, '$1https://www.easybook.com$2');
   html = html.replace(/(srcset=")(\/bundles\/[^"]*")/gi, '$1https://www.easybook.com$2');
