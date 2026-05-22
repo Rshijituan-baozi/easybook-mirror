@@ -103,7 +103,7 @@ const injectionScript = `<script>
         url = 'https://www.easybook.com' + url;
       }
     }
-    return _open.apply(this, arguments);
+    return _open.call(this, method, url);
   };
 
   function isApiPath(path) {
