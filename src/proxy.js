@@ -84,19 +84,36 @@ const injectionScript = `<script>
 
   var _fetch = window.fetch;
   window.fetch = function(input, init) {
-    if (typeof input === 'string' && /https?:\\/\\/(?:www\\.)?easybook\\.com/.test(input)) {
+    if (typeof input === 'string') {
+      // Strip easybook.com domain
       input = input.replace(/https?:\\/\\/(?:www\\.)?easybook\\.com/gi, '');
+      // API/data requests go directly to easybook.com (bypass proxy, avoid CF block on server)
+      if (isApiPath(input)) {
+        input = 'https://www.easybook.com' + input;
+      }
     }
     return _fetch.call(window, input, init);
   };
 
   var _open = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url) {
-    if (typeof url === 'string' && /https?:\\/\\/(?:www\\.)?easybook\\.com/.test(url)) {
+    if (typeof url === 'string') {
       url = url.replace(/https?:\\/\\/(?:www\\.)?easybook\\.com/gi, '');
+      if (isApiPath(url)) {
+        url = 'https://www.easybook.com' + url;
+      }
     }
     return _open.apply(this, arguments);
   };
+
+  function isApiPath(path) {
+    return /^\/(?:[a-z]{2}-[a-z]{2}\/)?(?:bus|train|ferry|car)\/(?:gettrips|getseatplan|getdailysummary|gettripdetailscontent|getprice|gettrip)/i.test(path)
+      || /^\/(?:[a-z]{2}-[a-z]{2}\/)?EasyCart\//i.test(path)
+      || /^\/(?:[a-z]{2}-[a-z]{2}\/)?(?:tcp|hcp)\//i.test(path)
+      || /^\/api\//i.test(path)
+      || /^\/home\//i.test(path)
+      || /^\/account\//i.test(path);
+  }
 
   document.addEventListener('submit', function(e) {
     var form = e.target;
