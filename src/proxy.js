@@ -52,7 +52,7 @@ function recordSuccess() {
 }
 
 // Stale cache support
-const STALE_TTL = 120 * 60 * 1000;
+const STALE_TTL = 24 * 60 * 60 * 1000;
 function cacheGetStale(key, ttl) {
   const e = cache.get(key);
   if (!e) return null;
@@ -64,7 +64,7 @@ function cacheGetStale(key, ttl) {
 }
 
 const cache = new Map();
-const HTML_TTL = 3 * 60 * 1000;
+const HTML_TTL = 60 * 60 * 1000;
 function cacheKey(req) { return req.method + ':' + req.url; }
 function cacheGet(key, ttl) {
   const e = cache.get(key);
@@ -380,6 +380,15 @@ function rewriteHtml(html, host) {
   html = html.replace(domainRe, '');
 
   html = html.replace(/((?:src|srcSet|href)=")(\/\/easycdn\.)/gi, '$1https://easycdn.');
+
+  // Static resources load directly from easybook.com (browser fetches, bypasses proxy)
+  html = html.replace(/(src=")(\/bundles\/[^"]*")/gi, '$1https://www.easybook.com$2');
+  html = html.replace(/(src=")(\/images\/[^"]*")/gi, '$1https://www.easybook.com$2');
+  html = html.replace(/(src=")(\/BotDetectCaptcha[^"]*")/gi, '$1https://www.easybook.com$2');
+  html = html.replace(/(href=")(\/Content\/[^"]*")/gi, '$1https://www.easybook.com$2');
+  html = html.replace(/(href=")(\/favicon[^"]*")/gi, '$1https://www.easybook.com$2');
+  html = html.replace(/(srcset=")(\/images\/[^"]*")/gi, '$1https://www.easybook.com$2');
+  html = html.replace(/(srcset=")(\/bundles\/[^"]*")/gi, '$1https://www.easybook.com$2');
 
   html = html.replace(/<head[^>]*>/i, m => `${m}\n<base href="/">`);
 
