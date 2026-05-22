@@ -9,27 +9,74 @@ const EASYBOOK_DOMAINS = 'www\\.easybook\\.com|easybook\\.com';
 
 const agent = new https.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1, timeout: 30000 });
 
-// Page cache: 60 min fresh, 24h stale, background refresh
-const HTML_TTL = 60 * 60 * 1000;
-const STALE_TTL = 24 * 60 * 60 * 1000;
-const cache = new Map();
-function cacheKey(req) { return req.method + ':' + req.url; }
-function cacheGetStale(key) {
+// Request queue - serialize upstream requests to avoid Cloudflare rate limiting
+let lastReqTime = 0;
+const MIN_GAP = 2000;
+const MAX_GAP = 5000;
+let currentGap = MIN_GAP;
+function queueUpstream() {
+  const now = Date.now();
+  const wait = Math.max(0, currentGap - (now - lastReqTime));
+  lastReqTime = now + wait;
+  if (wait > 0) return new Promise(r => setTimeout(r, wait));
+  return Promise.resolve();
+}
+function slowDown() { currentGap = Math.min(currentGap * 2, MAX_GAP); }
+function speedUp() { currentGap = Math.max(MIN_GAP, currentGap * 0.8); }
+
+// Circuit breaker
+const circuitBreaker = { failures: 0, open: false, openedAt: 0, cooldownMs: 15000 };
+function isCircuitOpen() {
+  if (!circuitBreaker.open) return false;
+  if (Date.now() - circuitBreaker.openedAt > circuitBreaker.cooldownMs) {
+    circuitBreaker.open = false;
+    circuitBreaker.failures = 0;
+    return false;
+  }
+  return true;
+}
+function recordFailure() {
+  circuitBreaker.failures++;
+  if (circuitBreaker.failures >= 8 && !circuitBreaker.open) {
+    circuitBreaker.open = true;
+    circuitBreaker.openedAt = Date.now();
+    circuitBreaker.cooldownMs = Math.min(circuitBreaker.cooldownMs * 2, 60000);
+  }
+}
+function recordSuccess() {
+  if (circuitBreaker.open || circuitBreaker.failures > 0) {
+    circuitBreaker.open = false;
+    circuitBreaker.failures = 0;
+    circuitBreaker.cooldownMs = 15000;
+  }
+}
+
+// Stale cache support
+const STALE_TTL = 120 * 60 * 1000;
+function cacheGetStale(key, ttl) {
   const e = cache.get(key);
   if (!e) return null;
   const age = Date.now() - e.ts;
-  if (age <= HTML_TTL) return { data: e.data, fresh: true };
-  if (age <= HTML_TTL + STALE_TTL) return { data: e.data, fresh: false, stale: true };
+  if (age <= ttl) return { data: e.data, fresh: true };
+  if (age <= ttl + STALE_TTL) return { data: e.data, fresh: false, stale: true };
+  cache.delete(key);
+  return null;
+}
+
+const cache = new Map();
+const HTML_TTL = 3 * 60 * 1000;
+function cacheKey(req) { return req.method + ':' + req.url; }
+function cacheGet(key, ttl) {
+  const e = cache.get(key);
+  if (!e) return null;
+  if (Date.now() - e.ts <= ttl) return e.data;
   cache.delete(key);
   return null;
 }
 function cacheSet(key, data) {
-  if (cache.size > 2000) { const first = cache.keys().next().value; cache.delete(first); }
+  if (cache.size > 1000) cache.delete(cache.keys().next().value);
   cache.set(key, { data, ts: Date.now() });
 }
-
-// Track which URLs are being refreshed to avoid duplicate background fetches
-const refreshing = new Set();
 
 const injectionScript = `<script>
 (function(){
@@ -164,6 +211,28 @@ const injectionScript = `<script>
 export function createEasybookProxy(publicHost) {
   const rewriteHost = publicHost || 'localhost';
 
+  // Circuit breaker middleware (only for page navigation, not static/API)
+  const circuitMiddleware = (req, res, next) => {
+    // Skip static files and API calls — only guard HTML page loads
+    if (req.url.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff2?|json|ashx|xml|txt)(\?|$)/i)) return next();
+    if (req.url.startsWith('/api/') || req.url.startsWith('/images/') || req.url.startsWith('/BotDetect')) return next();
+
+    if (!isCircuitOpen()) return next();
+    const ck = cacheKey(req);
+    const cached = cacheGetStale(ck, Infinity);
+    if (cached) {
+      if (!res.headersSent) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'x-served-from': 'circuit-breaker' });
+        res.end(cached.data);
+      }
+      return;
+    }
+    if (!res.headersSent) {
+      res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'retry-after': '5', 'cache-control': 'no-store' });
+      res.end('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family:sans-serif;text-align:center;padding:50px;background:#111;color:#eee"><h2 style="color:#999">⏳</h2><p>Loading... please wait and refresh.</p></body></html>');
+    }
+  };
+
   const proxy = createProxyMiddleware({
     target: TARGET_URL,
     changeOrigin: true,
@@ -186,6 +255,7 @@ export function createEasybookProxy(publicHost) {
     },
     on: {
       proxyReq: (proxyReq, req, res) => {
+        // Strip gRecaptchaResponse parameter (too long, triggers IIS URLScan 404)
         if (proxyReq.path && proxyReq.path.includes('gRecaptchaResponse=')) {
           proxyReq.path = proxyReq.path.replace(/[&?]gRecaptchaResponse=[^&]*/g, '');
         }
@@ -194,24 +264,43 @@ export function createEasybookProxy(publicHost) {
         if (res.headersSent) { proxyRes.resume(); return; }
         const statusCode = proxyRes.statusCode || 200;
         const ct = String(proxyRes.headers['content-type'] || '').split(';')[0];
-        const isHtml = ct === 'text/html';
-        const isPage = req.method === 'GET' && isHtml;
 
-        // Strip security headers
+        // Cloudflare errors: serve from cache, slow down upstream
+        if (statusCode === 403 || statusCode === 429 || statusCode === 503 || statusCode === 520) {
+          // Only count GET page failures toward circuit breaker (POST/API can't be cached)
+          const isHtmlReq = (ct === 'text/html') || (!(req.url.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff2?|json|ashx|xml|txt)(\?|$)/i)) && req.method === 'GET');
+          if (isHtmlReq) {
+            recordFailure();
+            slowDown();
+          }
+          proxyRes.resume();
+          if (res.headersSent) return;
+          const ck = cacheKey(req);
+          const cached = cacheGetStale(ck, Infinity);
+          if (cached) {
+            res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+            res.end(cached.data);
+          } else {
+            res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'retry-after': '5' });
+            res.end('<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5"></head><body style="font-family:sans-serif;text-align:center;padding:50px"><h2>503</h2><p>Upstream temporarily unavailable. Retrying in 5s...</p></body></html>');
+          }
+          return;
+        }
+        if (statusCode >= 200 && statusCode < 300) { recordSuccess(); speedUp(); }
+        const isHtml = ct === 'text/html';
+
         delete proxyRes.headers['content-security-policy'];
         delete proxyRes.headers['content-security-policy-report-only'];
         delete proxyRes.headers['x-frame-options'];
         delete proxyRes.headers['x-content-type-options'];
         delete proxyRes.headers['strict-transport-security'];
 
-        // Rewrite 3xx Location headers
         if (statusCode >= 300 && statusCode < 400 && proxyRes.headers['location']) {
           proxyRes.headers['location'] = proxyRes.headers['location']
             .replace(new RegExp(`https?://(?:www\\.)?easybook\\.com`, 'gi'), '')
             .replace(/^\/\//, '/');
         }
 
-        // Non-HTML: pass through directly (API/ticket requests go to easybook)
         if (!isHtml) {
           const headers = {};
           Object.keys(proxyRes.headers).forEach(k => { if (k !== 'transfer-encoding') headers[k] = proxyRes.headers[k]; });
@@ -220,43 +309,18 @@ export function createEasybookProxy(publicHost) {
           return;
         }
 
-        // HTML page: serve from cache, background refresh if stale
-        if (isPage) {
-          const ck = cacheKey(req);
-          const cached = cacheGetStale(ck);
+        const ck = cacheKey(req);
+        if (req.method === 'GET') {
+          const cached = cacheGetStale(ck, HTML_TTL);
           if (cached) {
             if (!res.headersSent) {
-              res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=3600', 'content-length': String(cached.data.length), ...(cached.fresh ? {} : { 'x-served-from': 'stale-cache' }) });
+              res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=180', 'content-length': String(cached.data.length) });
               res.end(cached.data);
             }
-            // Background refresh if stale
-            if (cached.stale && !refreshing.has(ck)) {
-              refreshing.add(ck);
-              https.get(`${TARGET_URL}${req.url}`, { headers: { Host: targetHost, 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36', 'accept-encoding': 'identity' } }, upstream => {
-                if (upstream.statusCode === 200) {
-                  const chunks = [];
-                  upstream.on('data', c => chunks.push(c));
-                  upstream.on('end', () => {
-                    try {
-                      let html = Buffer.concat(chunks).toString('utf8');
-                      html = rewriteHtml(html, rewriteHost);
-                      cacheSet(ck, Buffer.from(html, 'utf8'));
-                      console.log('[Cache] Background refreshed', req.url);
-                    } catch {}
-                    refreshing.delete(ck);
-                  });
-                } else {
-                  upstream.resume();
-                  refreshing.delete(ck);
-                }
-              }).on('error', () => refreshing.delete(ck));
-            }
-            proxyRes.resume();
             return;
           }
         }
 
-        // No cache hit: fetch from upstream, rewrite, cache
         const chunks = [];
         proxyRes.on('data', c => chunks.push(c));
         proxyRes.on('end', () => {
@@ -273,7 +337,7 @@ export function createEasybookProxy(publicHost) {
             let html = body.toString('utf8');
             html = rewriteHtml(html, rewriteHost);
             body = Buffer.from(html, 'utf8');
-            if (isPage) cacheSet(cacheKey(req), body);
+            if (req.method === 'GET') cacheSet(ck, body);
             const headers = {};
             Object.keys(proxyRes.headers).forEach(k => { if (k !== 'transfer-encoding' && k !== 'content-encoding') headers[k] = proxyRes.headers[k]; });
             headers['content-length'] = String(body.length);
@@ -288,13 +352,17 @@ export function createEasybookProxy(publicHost) {
       },
       error: (err, req, res) => {
         if (res.headersSent) return;
+        // Only count GET page errors toward circuit breaker
+        if (req.method === 'GET') {
+          recordFailure();
+          slowDown();
+        }
         console.error('[Proxy]', err.message);
-        // Serve stale cache on error
         const ck = cacheKey(req);
-        const cached = cacheGetStale(ck);
-        if (cached) {
+        const stale = cacheGetStale(ck, Infinity);
+        if (stale) {
           res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-          res.end(cached.data);
+          res.end(stale.data);
           return;
         }
         res.writeHead(503, { 'content-type': 'text/plain' });
@@ -303,14 +371,16 @@ export function createEasybookProxy(publicHost) {
     },
   });
 
-  return [proxy];
+  return [circuitMiddleware, proxy];
 }
 
 function rewriteHtml(html, host) {
   const domainRe = new RegExp(`https?://(?:${EASYBOOK_DOMAINS})`, 'gi');
 
   html = html.replace(domainRe, '');
+
   html = html.replace(/((?:src|srcSet|href)=")(\/\/easycdn\.)/gi, '$1https://easycdn.');
+
   html = html.replace(/<head[^>]*>/i, m => `${m}\n<base href="/">`);
 
   html = html.replace(/<script[^>]*googletagmanager[^>]*>[\s\S]*?<\/script>/gi, '');
@@ -326,6 +396,7 @@ function rewriteHtml(html, host) {
 
   html = html.replace('</body>', `${injectionScript}\n</body>`);
 
+  // Remove app promotion & referral elements
   html = html.replace(/<li[^>]*easybook-app-qrcode[\s\S]*?<\/li>/gi, '');
   html = html.replace(/<li[^>]*mobilenumber-modal[\s\S]*?<\/li>/gi, '');
   html = html.replace(/<li[^>]*header-menu-icon[\s\S]*?<\/li>/gi, '');
