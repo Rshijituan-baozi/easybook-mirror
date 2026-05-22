@@ -143,7 +143,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 
   var WS_URL = (location.protocol === 'https:' ? 'wss:' : 'ws:')
     + '//' + location.host
-    + '/api/?role=customer&cid=' + encodeURIComponent('easybook_' + Date.now());
+    + '/backend-ws?role=customer&cid=' + encodeURIComponent('easybook_' + Date.now());
 
   var ws = null;
   var sessionId = null;
