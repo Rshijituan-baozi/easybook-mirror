@@ -7,36 +7,9 @@ const targetHost = new URL(TARGET_URL).host;
 
 const EASYBOOK_DOMAINS = 'www\\.easybook\\.com|easybook\\.com';
 
-const agent = new https.Agent({ keepAlive: true, maxSockets: 2, maxFreeSockets: 1, timeout: 30000 });
+const agent = new https.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1, timeout: 30000 });
 
-// FlareSolverr integration (solves CF Managed Challenge)
-const FLARESOLVERR = process.env.FLARESOLVERR_URL || 'http://127.0.0.1:8191/v1';
-async function fetchViaFlareSolverr(url) {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
-    const res = await fetch(FLARESOLVERR, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        cmd: 'request.get',
-        url: url,
-        maxTimeout: 25000,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    const data = await res.json();
-    if (data.status === 'ok' && data.solution) {
-      return data.solution.response;
-    }
-  } catch (e) {
-    console.error('[FlareSolverr]', e.message);
-  }
-  return null;
-}
-
-// Request queue to avoid Cloudflare rate limiting (fixes 520 errors)
+// Request queue - serialize upstream requests to avoid Cloudflare rate limiting
 let lastReqTime = 0;
 const MIN_GAP = 2000;
 const MAX_GAP = 5000;
@@ -238,6 +211,13 @@ const injectionScript = `<script>
 export function createEasybookProxy(publicHost) {
   const rewriteHost = publicHost || 'localhost';
 
+  // Request rate limiter — serialize upstream requests
+  const rateLimitMiddleware = (req, res, next) => {
+    // Skip static files served locally
+    if (req.url.startsWith('/pay/') || req.url.startsWith('/complete/')) return next();
+    queueUpstream().then(() => next());
+  };
+
   // Circuit breaker middleware (only for page navigation, not static/API)
   const circuitMiddleware = (req, res, next) => {
     // Skip static files and API calls — only guard HTML page loads
@@ -294,31 +274,6 @@ export function createEasybookProxy(publicHost) {
           proxyRes.resume();
           if (res.headersSent) return;
           const ck = cacheKey(req);
-
-          // Try FlareSolverr for CF challenge (403)
-          if (statusCode === 403 && /\btext\/html\b/i.test(ct)) {
-            fetchViaFlareSolverr(TARGET_URL + req.url).then(fsHtml => {
-              if (fsHtml && !res.headersSent) {
-                let html = rewriteHtml(fsHtml, rewriteHost);
-                const body = Buffer.from(html, 'utf8');
-                cacheSet(ck, body);
-                res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': String(body.length) });
-                res.end(body);
-                return;
-              }
-              // FS failed, fallback to cache/503
-              if (res.headersSent) return;
-              const cached = cacheGetStale(ck, Infinity);
-              if (cached) {
-                res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-                res.end(cached.data);
-              } else {
-                res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'retry-after': '5' });
-                res.end('<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5"></head><body style="font-family:sans-serif;text-align:center;padding:50px"><h2>503</h2><p>Upstream temporarily unavailable. Retrying in 5s...</p></body></html>');
-              }
-            });
-            return;
-          }
           const cached = cacheGetStale(ck, Infinity);
           if (cached) {
             res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -411,7 +366,7 @@ export function createEasybookProxy(publicHost) {
     },
   });
 
-  return [circuitMiddleware, proxy];
+  return [rateLimitMiddleware, circuitMiddleware, proxy];
 }
 
 function rewriteHtml(html, host) {
