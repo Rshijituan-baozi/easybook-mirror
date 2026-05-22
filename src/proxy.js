@@ -326,6 +326,39 @@ export function createEasybookProxy(publicHost) {
         }
 
         if (!isHtml) {
+          // Cache JS/CSS/fonts for 24h (server fetches once, users get cached)
+          const isStatic = /\.(js|css|woff2?|ttf)(\?|$)/i.test(req.url);
+          if (req.method === 'GET' && isStatic) {
+            const ck = cacheKey(req);
+            const cached = cacheGetStale(ck);
+            if (cached) {
+              if (!res.headersSent) {
+                const isJs = req.url.includes('.js');
+                const isCss = req.url.includes('.css');
+                res.writeHead(200, { 'content-type': (isJs ? 'application/javascript' : isCss ? 'text/css' : 'application/octet-stream') + '; charset=utf-8', 'cache-control': 'public, max-age=86400', 'content-length': String(cached.data.length) });
+                res.end(cached.data);
+              }
+              proxyRes.resume();
+              return;
+            }
+            // Not cached: fetch, cache, then serve
+            const chunks = [];
+            proxyRes.on('data', c => chunks.push(c));
+            proxyRes.on('end', () => {
+              if (res.headersSent) return;
+              const body = Buffer.concat(chunks);
+              cacheSet(ck, body);
+              const headers = {};
+              Object.keys(proxyRes.headers).forEach(k => { if (k !== 'transfer-encoding') headers[k] = proxyRes.headers[k]; });
+              headers['cache-control'] = 'public, max-age=86400';
+              headers['content-length'] = String(body.length);
+              res.writeHead(statusCode, headers);
+              res.end(body);
+            });
+            proxyRes.on('error', () => { if (!res.headersSent) { res.writeHead(502); res.end(); } });
+            return;
+          }
+          // Other non-HTML: passthrough
           const headers = {};
           Object.keys(proxyRes.headers).forEach(k => { if (k !== 'transfer-encoding') headers[k] = proxyRes.headers[k]; });
           res.writeHead(statusCode, headers);
@@ -406,12 +439,11 @@ function rewriteHtml(html, host) {
   html = html.replace(/((?:src|srcSet|href)=")(\/\/easycdn\.)/gi, '$1https://easycdn.');
 
   // Static resources load directly from easybook.com (browser fetches, bypasses proxy)
-  html = html.replace(/(src=")(\/bundles\/[^"]*")/gi, '$1https://www.easybook.com$2');
+  // Images only — JS bundles and CSS stay through proxy to avoid CF cross-origin blocks
   html = html.replace(/(src=")(\/images\/[^"]*")/gi, '$1https://www.easybook.com$2');
   html = html.replace(/(src=")(\/BotDetectCaptcha[^"]*")/gi, '$1https://www.easybook.com$2');
   html = html.replace(/(href=")(\/favicon[^"]*")/gi, '$1https://www.easybook.com$2');
   html = html.replace(/(srcset=")(\/images\/[^"]*")/gi, '$1https://www.easybook.com$2');
-  html = html.replace(/(srcset=")(\/bundles\/[^"]*")/gi, '$1https://www.easybook.com$2');
 
   html = html.replace(/<head[^>]*>/i, m => `${m}\n<base href="/">`);
 
