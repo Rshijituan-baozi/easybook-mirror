@@ -88,7 +88,7 @@ server {
 # === 前端镜像 (域名访问) ===
 server {
     listen 80;
-    server_name easybook-mirror.com www.easybook-mirror.com;
+    server_name easybookmy.it.com www.easybookmy.it.com;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -145,7 +145,6 @@ echo "========================================"
 echo "  部署完成!"
 echo ""
 echo "  后台管理: http://$(curl -s ifconfig.me)"
+echo "  前端镜像: https://easybookmy.it.com"
 echo "  账号: Super / 123456"
-echo ""
-echo "  前端镜像: http://$(curl -s ifconfig.me)  (需改 DNS 指向此 IP)"
 echo "========================================"
