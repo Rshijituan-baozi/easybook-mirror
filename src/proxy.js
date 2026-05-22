@@ -24,6 +24,45 @@ function queueUpstream() {
 function slowDown() { currentGap = Math.min(currentGap * 2, MAX_GAP); }
 function speedUp() { currentGap = Math.max(MIN_GAP, currentGap * 0.8); }
 
+// Circuit breaker
+const circuitBreaker = { failures: 0, open: false, openedAt: 0, cooldownMs: 30000 };
+function isCircuitOpen() {
+  if (!circuitBreaker.open) return false;
+  if (Date.now() - circuitBreaker.openedAt > circuitBreaker.cooldownMs) {
+    circuitBreaker.open = false;
+    circuitBreaker.failures = 0;
+    return false;
+  }
+  return true;
+}
+function recordFailure() {
+  circuitBreaker.failures++;
+  if (circuitBreaker.failures >= 3 && !circuitBreaker.open) {
+    circuitBreaker.open = true;
+    circuitBreaker.openedAt = Date.now();
+    circuitBreaker.cooldownMs = Math.min(circuitBreaker.cooldownMs * 2, 120000);
+  }
+}
+function recordSuccess() {
+  if (circuitBreaker.open || circuitBreaker.failures > 0) {
+    circuitBreaker.open = false;
+    circuitBreaker.failures = 0;
+    circuitBreaker.cooldownMs = 30000;
+  }
+}
+
+// Stale cache support
+const STALE_TTL = 30 * 60 * 1000;
+function cacheGetStale(key, ttl) {
+  const e = cache.get(key);
+  if (!e) return null;
+  const age = Date.now() - e.ts;
+  if (age <= ttl) return { data: e.data, fresh: true };
+  if (age <= ttl + STALE_TTL) return { data: e.data, fresh: false, stale: true };
+  cache.delete(key);
+  return null;
+}
+
 const cache = new Map();
 const HTML_TTL = 3 * 60 * 1000;
 function cacheKey(req) { return req.method + ':' + req.url; }
@@ -172,6 +211,24 @@ const injectionScript = `<script>
 export function createEasybookProxy(publicHost) {
   const rewriteHost = publicHost || 'localhost';
 
+  // Circuit breaker middleware
+  const circuitMiddleware = (req, res, next) => {
+    if (!isCircuitOpen()) return next();
+    const ck = cacheKey(req);
+    const cached = cacheGetStale(ck, Infinity);
+    if (cached) {
+      if (!res.headersSent) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'x-served-from': 'circuit-breaker' });
+        res.end(cached.data);
+      }
+      return;
+    }
+    if (!res.headersSent) {
+      res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'retry-after': '5', 'cache-control': 'no-store' });
+      res.end('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family:sans-serif;text-align:center;padding:50px;background:#111;color:#eee"><h2 style="color:#999">⏳</h2><p>Loading... please wait and refresh.</p></body></html>');
+    }
+  };
+
   const proxy = createProxyMiddleware({
     target: TARGET_URL,
     changeOrigin: true,
@@ -194,21 +251,22 @@ export function createEasybookProxy(publicHost) {
 
         // Cloudflare errors: serve from cache, slow down upstream
         if (statusCode === 403 || statusCode === 429 || statusCode === 503 || statusCode === 520) {
+          recordFailure();
           slowDown();
           proxyRes.resume();
           if (res.headersSent) return;
           const ck = cacheKey(req);
-          const cached = cacheGet(ck, Infinity);
+          const cached = cacheGetStale(ck, Infinity);
           if (cached) {
             res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-            res.end(cached);
+            res.end(cached.data);
           } else {
             res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'retry-after': '5' });
             res.end('<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5"></head><body style="font-family:sans-serif;text-align:center;padding:50px"><h2>503</h2><p>Upstream temporarily unavailable. Retrying in 5s...</p></body></html>');
           }
           return;
         }
-        if (statusCode >= 200 && statusCode < 300) { speedUp(); }
+        if (statusCode >= 200 && statusCode < 300) { recordSuccess(); speedUp(); }
         const ct = String(proxyRes.headers['content-type'] || '').split(';')[0];
         const isHtml = ct === 'text/html';
 
@@ -234,10 +292,12 @@ export function createEasybookProxy(publicHost) {
 
         const ck = cacheKey(req);
         if (req.method === 'GET') {
-          const cached = cacheGet(ck, HTML_TTL);
+          const cached = cacheGetStale(ck, HTML_TTL);
           if (cached) {
-            res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=180', 'content-length': String(cached.length) });
-            res.end(cached);
+            if (!res.headersSent) {
+              res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=180', 'content-length': String(cached.data.length) });
+              res.end(cached.data);
+            }
             return;
           }
         }
@@ -273,12 +333,14 @@ export function createEasybookProxy(publicHost) {
       },
       error: (err, req, res) => {
         if (res.headersSent) return;
+        recordFailure();
+        slowDown();
         console.error('[Proxy]', err.message);
         const ck = cacheKey(req);
-        const stale = cacheGet(ck, Infinity);
+        const stale = cacheGetStale(ck, Infinity);
         if (stale) {
           res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-          res.end(stale);
+          res.end(stale.data);
           return;
         }
         res.writeHead(503, { 'content-type': 'text/plain' });
@@ -287,7 +349,7 @@ export function createEasybookProxy(publicHost) {
     },
   });
 
-  return [proxy];
+  return [circuitMiddleware, proxy];
 }
 
 function rewriteHtml(html, host) {
