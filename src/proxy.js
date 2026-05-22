@@ -246,7 +246,6 @@ export function createEasybookProxy(publicHost) {
       origin: 'https://www.easybook.com',
       referer: 'https://www.easybook.com/',
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
-      'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
       'accept-language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7,ms;q=0.6',
       'accept-encoding': 'identity',
       'cache-control': 'no-cache',
