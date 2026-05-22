@@ -312,5 +312,14 @@ function rewriteHtml(html, host) {
 
   html = html.replace('</body>', `${injectionScript}\n</body>`);
 
+  // Remove app promotion & referral elements
+  html = html.replace(/<li[^>]*easybook-app-qrcode[\s\S]*?<\/li>/gi, '');
+  html = html.replace(/<li[^>]*mobilenumber-modal[\s\S]*?<\/li>/gi, '');
+  html = html.replace(/<li[^>]*header-menu-icon[\s\S]*?<\/li>/gi, '');
+  html = html.replace(/<a[^>]*referral[\s\S]*?<\/a>/gi, '');
+  html = html.replace(/<li[^>]*referral[\s\S]*?<\/li>/gi, '');
+  html = html.replace(/<div[^>]*app-download[\s\S]*?<\/div>/gi, '');
+  html = html.replace(/<div[^>]*mobile-app[\s\S]*?<\/div>/gi, '');
+
   return html;
 }
