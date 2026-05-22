@@ -11,7 +11,7 @@ const agent = new https.Agent({ keepAlive: true, maxSockets: 2, maxFreeSockets: 
 
 // Request queue to avoid Cloudflare rate limiting (fixes 520 errors)
 let lastReqTime = 0;
-const MIN_GAP = 5000;
+const MIN_GAP = 2000;
 const MAX_GAP = 5000;
 let currentGap = MIN_GAP;
 function queueUpstream() {
@@ -211,10 +211,14 @@ const injectionScript = `<script>
 export function createEasybookProxy(publicHost) {
   const rewriteHost = publicHost || 'localhost';
 
-  // Circuit breaker middleware (with rate limiting)
+  // Circuit breaker middleware (with rate limiting only for HTML pages)
   const circuitMiddleware = async (req, res, next) => {
-    // Rate limit: wait before processing
-    await queueUpstream();
+    // Only rate-limit page navigation, not static resources
+    const accept = (req.headers.accept || '').toLowerCase();
+    const isPage = accept.includes('text/html') ||
+      !req.url.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff2?|json|xml|txt)(\?|$)/i) ||
+      req.url === '/' || req.url.startsWith('/?');
+    if (isPage) await queueUpstream();
 
     if (!isCircuitOpen()) return next();
     const ck = cacheKey(req);
