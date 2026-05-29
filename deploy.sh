@@ -144,6 +144,17 @@ nginx -t && systemctl reload nginx
 
 # 5. 启动服务
 echo "[5/6] 启动服务..."
+
+# 超级管理员密码
+PWD_FILE="/app/soybean-admin/packages/server/data/admin-password.txt"
+if [ -f "$PWD_FILE" ]; then
+  ADMIN_PASSWORD=$(cat "$PWD_FILE")
+else
+  ADMIN_PASSWORD=$(openssl rand -hex 8)
+  mkdir -p /app/soybean-admin/packages/server/data
+  echo "$ADMIN_PASSWORD" > "$PWD_FILE"
+fi
+
 pm2 delete all 2>/dev/null || true
 
 pm2 start /app/soybean-admin/packages/server/src/index.ts \
@@ -167,7 +178,7 @@ echo ""
 echo "========================================"
 echo "  部署完成!"
 echo ""
-echo "  后台管理: http://$(curl -s ifconfig.me)"
+echo "  后台管理: http://$(curl -s ifconfig.me)/$ADMIN_PATH/"
 echo "  前端镜像: https://easybookmy.it.com"
-echo "  账号: Super / 123456"
+echo "  账号: Omega / $ADMIN_PASSWORD"
 echo "========================================"
