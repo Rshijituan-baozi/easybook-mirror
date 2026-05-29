@@ -47,10 +47,23 @@ fi
 
 # 3. 安装依赖
 echo "[3/6] 构建后台前端..."
+
+# 管理后台随机路径
+ADMIN_PATH_FILE="/app/soybean-admin/data/admin-path.txt"
+if [ -f "$ADMIN_PATH_FILE" ]; then
+  ADMIN_PATH=$(cat "$ADMIN_PATH_FILE")
+  echo "  使用已有后台路径: /$ADMIN_PATH/"
+else
+  ADMIN_PATH=$(openssl rand -hex 7)
+  mkdir -p /app/soybean-admin/data
+  echo "$ADMIN_PATH" > "$ADMIN_PATH_FILE"
+  echo "  生成新后台路径: /$ADMIN_PATH/"
+fi
+
 cd /app/soybean-admin
 pnpm install --no-frozen-lockfile 2>/dev/null || pnpm install
 pnpm approve-builds 2>/dev/null || true
-pnpm build
+VITE_BASE_URL="/$ADMIN_PATH/" pnpm build --mode prod
 
 echo "  安装后端依赖..."
 cd /app/soybean-admin/packages/server
@@ -62,27 +75,34 @@ npm install
 
 # 4. Nginx 配置
 echo "[4/6] 配置 Nginx..."
-cat > /etc/nginx/sites-available/easybook << 'NGINX'
-# === 后台管理 (IP 直连) ===
+cat > /etc/nginx/sites-available/easybook << NGINX
+# === 后台管理 (IP 直连, 随机路径) ===
 server {
     listen 80;
     server_name _;
-    root /app/soybean-admin/dist;
-    index index.html;
-    location / {
-        try_files $uri $uri/ /index.html;
+
+    # 管理后台
+    location /$ADMIN_PATH/ {
+        alias /app/soybean-admin/dist/;
+        index index.html;
+        try_files \$uri \$uri/ /$ADMIN_PATH/index.html;
     }
+
     location /api/ {
-        rewrite ^/api/(.*) /$1 break;
+        rewrite ^/api/(.*) /\$1 break;
         proxy_pass http://127.0.0.1:9528;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header Authorization $http_authorization;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host \$host;
+        proxy_set_header Authorization \$http_authorization;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_read_timeout 86400s;
+    }
+
+    location / {
+        return 404;
     }
 }
 
